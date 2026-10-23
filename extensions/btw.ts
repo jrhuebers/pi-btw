@@ -38,6 +38,7 @@ import {
   type OverlayHandle,
   type OverlayOptions,
   type TUI,
+  type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { loadBtwExtensionResources, readBtwExtensionSources, readBtwWorkspaceMode } from "./btw-extension-tools";
 import { createBtwSshWorkspace, type BtwSshWorkspace } from "./btw-ssh-workspace";
@@ -1554,6 +1555,29 @@ export class BtwOverlayComponent extends Container implements Focusable {
     }
 
     return (button & 1) === 0 ? -3 : 3;
+  }
+
+  override handleMouse(event: TuiMouseEvent): ReturnType<Container["handleMouse"]> {
+    if (event.type !== "wheel") {
+      return super.handleMouse(event);
+    }
+    if (event.x < 0 || event.x >= event.width || event.y < 0 || event.y >= event.height) {
+      return undefined;
+    }
+
+    // Newer fullscreen Pi dispatches normalized mouse events, not raw SGR input.
+    // Consume wheels even at the scroll limits so the main session cannot scroll.
+    this.scrollTranscript(event.wheelDelta ?? 0);
+    return {
+      handled: true,
+      target: {
+        component: this,
+        originX: event.screenX - event.x,
+        originY: event.screenY - event.y,
+        width: event.width,
+        height: event.height,
+      },
+    };
   }
 
   handleInput(data: string): void {
