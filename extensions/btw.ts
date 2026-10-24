@@ -42,6 +42,7 @@ import {
 import { loadBtwExtensionResources, readBtwExtensionSources, readBtwWorkspaceMode } from "./btw-extension-tools";
 import { createBtwSshWorkspace, type BtwSshWorkspace } from "./btw-ssh-workspace";
 import { BtwTranscriptRenderer, type BtwTranscript, type BtwTranscriptEntry } from "./btw-transcript";
+import { BtwWindowGeometry } from "./btw-window";
 
 export const BTW_COMMANDS = [
   { name: "btw", description: "Continue a side conversation in a focused BTW modal. Add --save to also persist a visible note." },
@@ -1277,12 +1278,16 @@ export class BtwOverlayComponent extends Container implements Focusable {
     getWorkspaceLabel: () => string = () => "local",
     cwd = process.cwd(),
     getToolRenderers?: (name: string, builtin?: ToolRenderers) => ToolRenderers | undefined,
+    private readonly windowGeometry = new BtwWindowGeometry(),
   ) {
     super();
     this.tui = tui;
     this.theme = theme;
     this.keybindings = keybindings;
     this.nativeTranscript = new BtwTranscriptRenderer(tui, cwd, getToolRenderers);
+    this.windowGeometry.setFullWidth(getWidthMode() === "full");
+    this.windowGeometry.updateViewport(tui.terminal?.columns ?? process.stdout.columns ?? 100,
+      tui.terminal?.rows ?? process.stdout.rows ?? 30);
     // Fullscreen Pi owns mouse reporting for the entire terminal session. In
     // regular mode BTW manages it while the overlay exists.
     this.managesMouseReporting = tui.mode !== "fullscreen";
@@ -1366,10 +1371,10 @@ export class BtwOverlayComponent extends Container implements Focusable {
     return true;
   }
 
-  private completionRows(): string[] {
+  private completionRows(maxRows = 5): string[] {
     this.updateCompletions();
-    const start = Math.max(0, this.completionIndex - 4);
-    return this.completionItems.slice(start, start + 5).map((command, index) => {
+    const start = Math.max(0, this.completionIndex - maxRows + 1);
+    return this.completionItems.slice(start, start + maxRows).map((command, index) => {
       const selected = start + index === this.completionIndex;
       return this.theme.fg(selected ? "accent" : "dim",
         `${selected ? "→" : " "} /${command.name}  ${command.description}`);
@@ -1409,8 +1414,9 @@ export class BtwOverlayComponent extends Container implements Focusable {
   }
 
   private getDialogHeight(): number {
-    const terminalRows = this.tui.terminal?.rows ?? process.stdout.rows ?? 30;
-    return Math.max(18, Math.min(32, Math.floor(terminalRows * 0.78)));
+    this.windowGeometry.updateViewport(this.tui.terminal?.columns ?? process.stdout.columns ?? 100,
+      this.tui.terminal?.rows ?? process.stdout.rows ?? 30);
+    return this.windowGeometry.getHeight();
   }
 
   private scrollTranscript(delta: number): void {
@@ -1422,6 +1428,7 @@ export class BtwOverlayComponent extends Container implements Focusable {
   }
 
   dispose(): void {
+    this.windowGeometry.endResize();
     this.nativeTranscript.dispose();
     if (this.managesMouseReporting) {
       this.tui.terminal?.write?.("\x1b[?1000l\x1b[?1006l");
@@ -1443,6 +1450,23 @@ export class BtwOverlayComponent extends Container implements Focusable {
   }
 
   override handleMouse(event: TuiMouseEvent): ReturnType<Container["handleMouse"]> {
+    const result = (capture = false): NonNullable<ReturnType<Container["handleMouse"]>> => ({
+      handled: true,
+      ...(capture ? { capture: true, focus: true } : {}),
+      target: {
+        component: this, originX: event.screenX - event.x, originY: event.screenY - event.y,
+        width: event.width, height: event.height,
+      },
+    });
+    if (event.type === "press" && this.windowGeometry.beginResize(event)) {
+      return result(true);
+    }
+    if (this.windowGeometry.isResizing && (event.type === "drag" || event.type === "release")) {
+      this.windowGeometry.dragResize(event);
+      if (event.type === "release") this.windowGeometry.endResize();
+      this.tui.requestRender();
+      return result();
+    }
     if (event.type !== "wheel") {
       return super.handleMouse(event);
     }
@@ -1453,16 +1477,7 @@ export class BtwOverlayComponent extends Container implements Focusable {
     // Newer fullscreen Pi dispatches normalized mouse events, not raw SGR input.
     // Consume wheels even at the scroll limits so the main session cannot scroll.
     this.scrollTranscript(event.wheelDelta ?? 0);
-    return {
-      handled: true,
-      target: {
-        component: this,
-        originX: event.screenX - event.x,
-        originY: event.screenY - event.y,
-        width: event.width,
-        height: event.height,
-      },
-    };
+    return result();
   }
 
   handleInput(data: string): void {
@@ -1473,6 +1488,22 @@ export class BtwOverlayComponent extends Container implements Focusable {
 
     if (matchesBtwWidthToggle(data)) {
       this.onToggleWidthCallback();
+      return;
+    }
+
+    const resizeSteps: Array<[KeyId, number, number]> = [
+      [Key.altShift("left"), -4, 0], [Key.altShift("right"), 4, 0],
+      [Key.altShift("up"), 0, -2], [Key.altShift("down"), 0, 2],
+    ];
+    for (const [key, columns, rows] of resizeSteps) {
+      if (!matchesKey(data, key)) continue;
+      this.windowGeometry.resizeBy(columns, rows);
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.altShift("r"))) {
+      this.windowGeometry.reset();
+      this.tui.requestRender();
       return;
     }
 
@@ -1548,9 +1579,10 @@ export class BtwOverlayComponent extends Container implements Focusable {
       ? this.nativeTranscript.render(entries, innerWidth)
       : [this.theme.fg("dim", "No BTW thread yet. Ask a side question to start one.")];
     const dialogHeight = this.getDialogHeight();
-    const chromeHeight = BTW_OVERLAY_CHROME_LINES;
-    const completionRows = this.completionRows();
-    const transcriptHeight = Math.max(1, dialogHeight - chromeHeight - completionRows.length);
+    const compact = dialogHeight < 12;
+    const chromeHeight = compact ? (dialogHeight >= 4 ? 3 : 1) : BTW_OVERLAY_CHROME_LINES;
+    const completionRows = compact ? [] : this.completionRows(Math.min(5, Math.max(0, dialogHeight - chromeHeight - 1)));
+    const transcriptHeight = Math.max(0, dialogHeight - chromeHeight - completionRows.length);
     this.transcriptViewportHeight = transcriptHeight;
 
     const maxScroll = Math.max(0, transcriptLines.length - transcriptHeight);
@@ -1574,6 +1606,15 @@ export class BtwOverlayComponent extends Container implements Focusable {
       hiddenAbove || hiddenBelow
         ? `${this.summaryTextValue.trim()} · ↑${hiddenAbove} ↓${hiddenBelow}`
         : this.summaryTextValue.trim();
+
+    if (compact) {
+      const lines = dialogHeight >= 4 ? [this.borderLine(innerWidth, "top")] : [];
+      for (const line of visibleTranscript) lines.push(this.frameLine(line, innerWidth));
+      for (let i = 0; i < transcriptPadCount; i++) lines.push(this.frameLine("", innerWidth));
+      lines.push(this.inputFrameLine(dialogWidth));
+      if (dialogHeight >= 4) lines.push(this.borderLine(innerWidth, "bottom"));
+      return lines.map((line) => this.fitRenderedLine(line, width));
+    }
 
     const lines = [this.borderLine(innerWidth, "top")];
 
@@ -1634,7 +1675,7 @@ export class BtwOverlayComponent extends Container implements Focusable {
 
     const status = this.getStatus() ?? "Ready. Enter submits; Escape dismisses without clearing.";
     this.statusTextValue = status;
-    this.hintsTextValue = `↑↓ scroll · Ctrl+O tools · Ctrl+T thinking · ${BTW_FOCUS_SHORTCUTS_LABEL} focus · Alt+w width · Esc`;
+    this.hintsTextValue = `Drag border to resize · Alt+Shift+arrows size · Alt+Shift+R reset · Alt+w width · Ctrl+O tools · Ctrl+T thinking · ${BTW_FOCUS_SHORTCUTS_LABEL} focus · Esc`;
     this.tui.requestRender();
   }
 }
@@ -1648,6 +1689,7 @@ export default function (pi: ExtensionAPI) {
   let overlayStatus: string | null = null;
   let overlayDraft = "";
   let overlayWidthMode: BtwOverlayWidthMode = "window";
+  const windowGeometry = new BtwWindowGeometry();
   let overlayRuntime: OverlayRuntime | null = null;
   let lastUiContext: ExtensionContext | ExtensionCommandContext | null = null;
   let activeBtwSession: BtwSessionRuntime | null = null;
@@ -1709,27 +1751,17 @@ export default function (pi: ExtensionAPI) {
   }
 
   function getOverlayOptions(): OverlayOptions {
-    const base: OverlayOptions = {
-      minWidth: 72,
-      maxHeight: "78%",
-      anchor: "top-center",
-      nonCapturing: true,
-    };
-    if (overlayWidthMode === "full") {
-      // Edge-to-edge so a terminal Shift+drag selection captures only the
-      // dialog's own text — nothing from the main screen sits beside it.
-      return { ...base, width: "100%", margin: { top: 1 } };
-    }
-    // Framed "window" look: narrower, inset from the terminal edges.
-    return { ...base, width: "78%", margin: { top: 1, left: 2, right: 2 } };
+    windowGeometry.setFullWidth(overlayWidthMode === "full");
+    // Pi retains this options object. Mutating it and requesting a render keeps
+    // one overlay/component alive throughout a captured mouse drag.
+    return windowGeometry.options;
   }
 
   async function toggleOverlayWidth(ctx: ExtensionContext | ExtensionCommandContext): Promise<void> {
     overlayWidthMode = overlayWidthMode === "window" ? "full" : "window";
 
-    // overlayOptions is resolved once at showOverlay time, so a width change
-    // requires tearing down and re-opening the overlay. The close path persists
-    // the draft into overlayDraft, and ensureOverlay restores it on reopen.
+    // Reopen to switch border/chrome mode, preserving the shared window geometry
+    // and composer draft. Ordinary edge resizing does not recreate the overlay.
     const wasFocused = overlayRuntime?.handle?.isFocused() ?? true;
     dismissOverlay();
     await ensureOverlay(ctx);
@@ -2241,6 +2273,7 @@ export default function (pi: ExtensionAPI) {
               } : builtin;
               return session?.extensionRunner?.resolveToolRenderers?.(name, base) ?? base();
             },
+            windowGeometry,
           );
 
           overlay.focused = runtime.handle?.isFocused() ?? true;

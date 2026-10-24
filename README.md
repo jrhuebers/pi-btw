@@ -98,6 +98,16 @@ pi install /absolute/path/to/pi-btw
 
 This is a transcript view, not a second interactive Pi client: tool/thinking expansion is controlled by keyboard shortcuts rather than clicking individual rows, and inline tool-result images are disabled. Child-session UI dialogs remain headless. Existing persisted BTW exchanges still restore their saved question/final answer/thinking, but cannot reconstruct historical intermediate messages or tool results that upstream never saved. This change does not alter the hidden-thread persistence format, model/tool permissions, or injection behavior.
 
+## Resizing the window
+
+In fullscreen Pi, drag any window border or corner with the left mouse button to resize it. The opposite edge stays fixed, and dragging continues outside the original window while the mouse button is held. Dragging inside the transcript still leaves text-selection behavior alone; Shift/Alt/Ctrl-modified presses do not start a resize.
+
+While BTW is focused, Alt+Shift+Left/Right changes its width by four columns, and Alt+Shift+Up/Down changes its height by two rows. Alt+Shift+R resets the dimensions to the default. These keyboard controls also work in regular mode; mouse dragging requires fullscreen mode and a terminal which reports mouse drag events.
+
+The window remembers its size and position while closed and reopened within the same main session. Alt+W still switches to full-width copy mode and back without losing the saved window size; full-width mode supports vertical resizing only. Sizes are clamped to the terminal, and the preferred dimensions are restored when the terminal grows again. User-resized windows can be taller than the old 32-row limit. The minimum is normally 40 columns by 12 rows, shrinking further only when the terminal cannot fit that size. Short terminals use reduced chrome to keep the composer available.
+
+Resizing does not restart the BTW child, close its overlay, clear the draft, or discard streaming output. Geometry is session-local and is not written into hidden thread history or global settings.
+
 ## Overlay controls
 
 - `Alt+w` toggles the overlay between the framed window layout (inset from the terminal edges) and a full-width layout

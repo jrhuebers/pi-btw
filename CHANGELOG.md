@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [0.9.0-fork.2] - 2026-10-24
+
+### Added
+
+- Live fullscreen window resizing by dragging any border or corner, with mouse capture outside the original bounds.
+- Alt+Shift+arrows for keyboard resizing and Alt+Shift+R to reset dimensions, including a regular-mode fallback.
+- Session-local preferred geometry across reopen/full-width toggles, terminal-size clamping/restoration, and windows taller than the former 32-row cap.
+- Compact chrome and bounded completion menus on short viewports so the composer stays available.
+
 ## [0.9.0-fork.1] - 2026-10-24
 
 The jrhuebers fork targets Pi 1.4.0 through 1.x and is installed from Git, not the upstream npm package.

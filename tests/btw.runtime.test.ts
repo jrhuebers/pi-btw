@@ -535,7 +535,7 @@ function createHarness(
   const terminalWrites: string[] = [];
   const tui = {
     requestRender: vi.fn(),
-    terminal: { write: (data: string) => terminalWrites.push(data) },
+    terminal: { columns: 100, write: (data: string) => terminalWrites.push(data) },
     mode: options.tuiMode,
   };
   const theme = options.theme ?? {
@@ -2884,7 +2884,9 @@ describe("btw runtime behavior", () => {
     expect(harness.overlays.at(-1)?.factoryOptions).toMatchObject({
       overlay: true,
       overlayOptions: {
-        anchor: "top-center",
+        anchor: "top-left",
+        row: 1,
+        col: 11,
         nonCapturing: true,
       },
     });
@@ -2899,13 +2901,46 @@ describe("btw runtime behavior", () => {
     await harness.command("btw", "overlay question");
 
     expect(harness.overlays.at(-1)?.factoryOptions?.overlayOptions).toMatchObject({
-      width: "78%",
-      margin: { top: 1, left: 2, right: 2 },
+      width: 78,
+      col: 11,
+      row: 1,
+      margin: 0,
     });
 
     const overlay = harness.latestOverlayComponent();
     overlay.refresh();
     expect(overlay["hintsTextValue"]).toContain("Alt+w width");
+  });
+
+  it("keeps resized geometry and the draft across dismissal, reopen, and full-width toggles", async () => {
+    const harness = createHarness();
+    await harness.runSessionStart();
+    await harness.command("btw", "");
+    const overlay = harness.latestOverlayComponent();
+    overlay.setDraft("resizable draft");
+    overlay.handleInput("\x1b[1;4C");
+    overlay.handleInput("\x1b[1;4B");
+    const options = harness.overlays.at(-1)!.factoryOptions!.overlayOptions as Record<string, unknown>;
+    const resized = { width: options.width, maxHeight: options.maxHeight, row: options.row, col: options.col };
+    expect(resized.width).toBe(82);
+    expect(harness.overlays).toHaveLength(1); // resizing never tears down the overlay
+
+    overlay.input.onEscape?.();
+    await flushAsyncWork();
+    await harness.command("btw", "");
+    const reopened = harness.latestOverlayComponent();
+    expect(reopened.getDraft()).toBe("resizable draft");
+    expect(harness.overlays.at(-1)?.factoryOptions?.overlayOptions).toMatchObject(resized);
+
+    reopened.handleInput("\x1bw");
+    await flushAsyncWork();
+    expect(harness.overlays.at(-1)?.factoryOptions?.overlayOptions).toMatchObject({
+      width: 100, maxHeight: resized.maxHeight,
+    });
+    await harness.shortcut("alt+w");
+    await flushAsyncWork();
+    expect(harness.overlays.at(-1)?.factoryOptions?.overlayOptions).toMatchObject(resized);
+    expect(harness.latestOverlayComponent().getDraft()).toBe("resizable draft");
   });
 
   it("toggles the overlay between window and full-width layouts on Alt+w, preserving the draft", async () => {
@@ -2923,8 +2958,10 @@ describe("btw runtime behavior", () => {
     await flushAsyncWork();
 
     expect(harness.overlays.at(-1)?.factoryOptions?.overlayOptions).toMatchObject({
-      width: "100%",
-      margin: { top: 1 },
+      width: 100,
+      col: 0,
+      row: 1,
+      margin: 0,
     });
     const fullOverlay = harness.latestOverlayComponent();
     expect(fullOverlay.getDraft()).toBe("kept draft");
@@ -2935,8 +2972,10 @@ describe("btw runtime behavior", () => {
     await flushAsyncWork();
 
     expect(harness.overlays.at(-1)?.factoryOptions?.overlayOptions).toMatchObject({
-      width: "78%",
-      margin: { top: 1, left: 2, right: 2 },
+      width: 78,
+      col: 11,
+      row: 1,
+      margin: 0,
     });
     const windowOverlay = harness.latestOverlayComponent();
     expect(windowOverlay.getDraft()).toBe("kept draft");

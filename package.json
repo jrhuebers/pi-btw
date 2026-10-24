@@ -1,6 +1,6 @@
 {
   "name": "pi-btw",
-  "version": "0.9.0-fork.1",
+  "version": "0.9.0-fork.2",
   "description": "Parallel Pi side conversations with native transcript rendering and fullscreen mouse scrolling",
   "type": "module",
   "license": "MIT",
