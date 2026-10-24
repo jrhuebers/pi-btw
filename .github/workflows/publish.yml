@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   publish:
+    if: github.repository == 'dbachelder/pi-btw'
     runs-on: ubuntu-latest
     environment: npm
     steps:

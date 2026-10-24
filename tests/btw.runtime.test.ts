@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
+import { AssistantMessageComponent, initTheme, ToolExecutionComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, RegisteredCommand } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import btwExtension, {
@@ -67,29 +69,11 @@ vi.mock("../extensions/btw-extension-tools", () => ({
 
 vi.mock("../extensions/btw-ssh-workspace", () => ({ createBtwSshWorkspace: createBtwSshWorkspaceMock }));
 
-const markdownTheme = {
-  heading: (text: string) => `<heading>${text}</heading>`,
-  link: (text: string) => text,
-  linkUrl: (text: string) => text,
-  code: (text: string) => text,
-  codeBlock: (text: string) => text,
-  codeBlockBorder: (text: string) => text,
-  quote: (text: string) => text,
-  quoteBorder: (text: string) => text,
-  hr: (text: string) => text,
-  listBullet: (text: string) => text,
-  bold: (text: string) => `<bold>${text}</bold>`,
-  italic: (text: string) => `<italic>${text}</italic>`,
-  strikethrough: (text: string) => text,
-  underline: (text: string) => text,
-};
-
 vi.mock("@earendil-works/pi-coding-agent", async () => {
   const actual = await vi.importActual<typeof import("@earendil-works/pi-coding-agent")>("@earendil-works/pi-coding-agent");
   return {
     ...actual,
     createAgentSession: createAgentSessionMock,
-    getMarkdownTheme: () => markdownTheme,
     ModelRuntime: modelRuntimeExport,
     SessionManager: {
       ...actual.SessionManager,
@@ -164,38 +148,14 @@ const tuiMocks = vi.hoisted(() => {
     }
   }
 
-  class FakeContainer {
-    children: unknown[] = [];
-    addChild(child: unknown) {
-      this.children.push(child);
-    }
-    clear() {
-      this.children = [];
-    }
-  }
-
-  class FakeText {
-    constructor(public text: string) {}
-    setText(text: string) {
-      this.text = text;
-    }
-  }
-
-  class FakeSpacer {}
-  class FakeBox extends FakeContainer {}
-
-  return { FakeInput, FakeContainer, FakeText, FakeSpacer, FakeBox };
+  return { FakeInput };
 });
 
 vi.mock("@earendil-works/pi-tui", async () => {
   const actual = await vi.importActual<typeof import("@earendil-works/pi-tui")>("@earendil-works/pi-tui");
   return {
     ...actual,
-    Container: tuiMocks.FakeContainer,
-    Text: tuiMocks.FakeText,
     Input: tuiMocks.FakeInput,
-    Spacer: tuiMocks.FakeSpacer,
-    Box: tuiMocks.FakeBox,
   };
 });
 
@@ -527,7 +487,13 @@ function getCustomEntries(entries: SessionEntry[], customType: string): CustomEn
 
 function transcriptText(overlay: any): string {
   overlay.refresh();
-  return overlay.transcript.children.map((child: any) => child.text).join("\n");
+  return stripVTControlCharacters(overlay.nativeTranscript.render(overlay.getTranscriptEntries(), 120).join("\n"));
+}
+
+/** Full overlay frame text, including chrome and the empty-thread placeholder. */
+function overlayText(overlay: any, width = 120): string {
+  overlay.refresh();
+  return stripVTControlCharacters(overlay.render(width).join("\n"));
 }
 
 function transcriptEntries(overlay: any) {
@@ -867,6 +833,7 @@ function createHarness(
 
 describe("btw runtime behavior", () => {
   beforeEach(() => {
+    initTheme("dark", false);
     promptStreamMock.mockReset();
     createAgentSessionMock.mockReset();
     sessionManagerInMemoryMock.mockClear();
@@ -1084,7 +1051,7 @@ describe("btw runtime behavior", () => {
     expect(subSessionRecords[0].options.customTools).toBe(workspace.tools);
     expect(subSessionRecords[0].options.tools).toEqual(["read", "grep", "find", "ls"]);
     expect(readBtwExtensionSourcesMock).not.toHaveBeenCalled();
-    expect(harness.latestOverlayComponent()["modeText"].text).toContain(workspace.label);
+    expect(harness.latestOverlayComponent()["modeTextValue"]).toContain(workspace.label);
     expect(subSessionRecords[0].options.resourceLoader.getAppendSystemPrompt().join(" ")).toContain(workspace.label);
     await harness.command("btw:clear");
     expect(workspace.dispose).toHaveBeenCalledTimes(1);
@@ -1098,7 +1065,7 @@ describe("btw runtime behavior", () => {
     workspace.assertCurrent.mockImplementation(() => { throw new Error("Parent SSH workspace changed. Run /btw:clear."); });
     await harness.command("btw", "must not submit");
     expect(subSessionRecords[0].session.prompt).toHaveBeenCalledTimes(1);
-    expect(harness.latestOverlayComponent()["statusText"].text).toContain("/btw:clear");
+    expect(harness.latestOverlayComponent()["statusTextValue"]).toContain("/btw:clear");
   });
 
   it("does not create a local child after remote connection failure", async () => {
@@ -1661,7 +1628,7 @@ describe("btw runtime behavior", () => {
     expect(record.session.prompt).toHaveBeenCalledWith("read-only question", { source: "extension" });
 
     const overlay = harness.latestOverlayComponent();
-    expect(overlay["modeText"].text).toContain("read-only");
+    expect(overlay["modeTextValue"]).toContain("read-only");
     expect(getCustomEntries(harness.entries, "btw-thread-reset").at(-1)?.data).toMatchObject({ mode: "readonly" });
   });
 
@@ -1736,7 +1703,7 @@ describe("btw runtime behavior", () => {
     expect(records[3].session.dispose).not.toHaveBeenCalled();
 
     const overlay = harness.latestOverlayComponent();
-    expect(overlay["modeText"].text).toContain("BTW tangent");
+    expect(overlay["modeTextValue"]).toContain("BTW tangent");
     const resets = getCustomEntries(harness.entries, "btw-thread-reset");
     expect(resets.map((entry) => (entry.data as any)?.mode)).toEqual(["readonly", "contextual", "tangent"]);
   });
@@ -1755,8 +1722,8 @@ describe("btw runtime behavior", () => {
     await restoredHarness.command("btw:ask", "");
 
     const overlay = restoredHarness.latestOverlayComponent();
-    expect(overlay["modeText"].text).toContain("read-only");
-    expect(transcriptText(overlay)).toContain("You  read-only question");
+    expect(overlay["modeTextValue"]).toContain("read-only");
+    expect(transcriptText(overlay)).toContain("read-only question");
     expect(createAgentSessionMock.mock.calls.at(-1)?.[0].tools).toEqual(["read", "grep", "find", "ls"]);
     expect(getCustomEntries(restoredHarness.entries, "btw-thread-reset")).toHaveLength(1);
   });
@@ -1788,7 +1755,7 @@ describe("btw runtime behavior", () => {
 
     expect(harness.overlays).toHaveLength(1);
     const overlay = harness.latestOverlayComponent();
-    expect(overlay["modeText"].text).toContain("read-only");
+    expect(overlay["modeTextValue"]).toContain("read-only");
     expect(createAgentSessionMock.mock.calls.at(-1)?.[0].tools).toEqual(["read", "grep", "find", "ls"]);
     const resets = getCustomEntries(harness.entries, "btw-thread-reset");
     expect(resets).toHaveLength(1);
@@ -1812,10 +1779,10 @@ describe("btw runtime behavior", () => {
     expect(resets).toHaveLength(1);
     expect(resets.at(-1)?.data).toMatchObject({ mode: "readonly" });
     expect(subSessionRecords.at(-1)?.options.tools).toEqual(["read", "grep", "find", "ls"]);
-    expect(overlay["modeText"].text).toContain("read-only");
+    expect(overlay["modeTextValue"]).toContain("read-only");
     const transcript = transcriptText(overlay);
-    expect(transcript).toContain("You  read-only follow-up");
-    expect(transcript).not.toContain("You  first question");
+    expect(transcript).toContain("read-only follow-up");
+    expect(transcript).not.toContain("first question");
   });
 
   it.each(["btw", "side"])("dispatches in-modal /%s through contextual BTW semantics", async (command) => {
@@ -1827,7 +1794,7 @@ describe("btw runtime behavior", () => {
     await flushAsyncWork();
     expect([...subSessionRecords.at(-1)!.options.tools].sort()).toEqual(["bash", "edit", "read", "write"]);
     expect(subSessionRecords.at(-1)?.session.prompt).toHaveBeenLastCalledWith("contextual follow-up", { source: "extension" });
-    expect(overlay["modeText"].text).not.toContain("read-only");
+    expect(overlay["modeTextValue"]).not.toContain("read-only");
   });
 
   it("preserves BTW overlay recoverability after agent prompt failure", async () => {
@@ -1849,8 +1816,9 @@ describe("btw runtime behavior", () => {
     await harness.command("btw", "broken question");
 
     const overlay = harness.latestOverlayComponent();
-    expect(overlay.statusText.text).toContain("Request failed. Thread preserved for retry or follow-up.");
-    expect(transcriptText(overlay)).toContain("❌ Sub-session prompt exploded");
+    expect(overlay["statusTextValue"]).toContain("Request failed. Thread preserved for retry or follow-up.");
+    expect(transcriptText(overlay)).toContain("Error: Sub-session prompt exploded");
+    expect(transcriptText(overlay)).not.toContain("❌");
     expect(harness.notifications.at(-1)).toEqual({
       message: "Sub-session prompt exploded",
       type: "error",
@@ -1862,7 +1830,7 @@ describe("btw runtime behavior", () => {
 
     expect(getCustomEntries(harness.entries, "btw-thread-entry")).toHaveLength(1);
     expect(transcriptText(overlay)).toContain("Recovered answer");
-    expect(overlay.statusText.text).toContain("Ready for a follow-up. Hidden BTW thread updated.");
+    expect(overlay["statusTextValue"]).toContain("Ready for a follow-up. Hidden BTW thread updated.");
   });
 
   it("subscribes to the BTW sub-session as soon as the overlay opens", async () => {
@@ -1937,7 +1905,7 @@ describe("btw runtime behavior", () => {
     await flushAsyncWork();
 
     const overlay = harness.latestOverlayComponent();
-    expect(overlay.statusText.text).toContain("running tool: read");
+    expect(overlay["statusTextValue"]).toContain("running tool: read");
 
     const firstRecord = subSessionRecords[0];
     expect(firstRecord).toBeDefined();
@@ -1952,7 +1920,7 @@ describe("btw runtime behavior", () => {
     expect(firstRecord.session.dispose).not.toHaveBeenCalled();
     expect(firstRecord.getListenerCount()).toBe(1);
     expect(harness.overlayHandles.at(-1)?.hideCalls).toBe(0);
-    expect(overlay.statusText.text).toContain("Press Esc again to dismiss");
+    expect(overlay["statusTextValue"]).toContain("Press Esc again to dismiss");
 
     // The aborted request settles without persisting a completed exchange, while
     // its partial user/tool transcript remains readable.
@@ -2000,11 +1968,11 @@ describe("btw runtime behavior", () => {
     await pendingCommand;
 
     expect(transcriptText(overlay)).toContain("Partial answer");
-    expect(findLatest(transcriptEntries(overlay), (entry: any) => entry.type === "assistant-text")).toMatchObject({
-      text: "Partial answer",
+    expect(findLatest(transcriptEntries(overlay), (entry: any) => entry.type === "assistant-message")).toMatchObject({
+      message: { content: [{ type: "text", text: "Partial answer" }], stopReason: "aborted" },
       streaming: false,
     });
-    expect(overlay.summaryText.text).toContain("0 exchanges");
+    expect(overlay["summaryTextValue"]).toContain("0 exchanges");
     expect(getCustomEntries(harness.entries, "btw-thread-entry")).toHaveLength(0);
   });
 
@@ -2110,7 +2078,7 @@ describe("btw runtime behavior", () => {
     overlay.input.onEscape?.();
     await flushAsyncWork();
     expect(record.getIsStreaming()).toBe(true);
-    expect(overlay.statusText.text).toContain("Aborting");
+    expect(overlay["statusTextValue"]).toContain("Aborting");
 
     overlay.input.onEscape?.();
     await flushAsyncWork();
@@ -2242,7 +2210,7 @@ describe("btw runtime behavior", () => {
 
     const record = subSessionRecords[0];
     expect(record.getIsStreaming()).toBe(true);
-    expect(overlay.statusText.text).toContain("running tool: read");
+    expect(overlay["statusTextValue"]).toContain("running tool: read");
     expect(harness.baseCtx.isIdle()).toBe(true);
 
     const mainTurn = harness.startMainSessionInput("continue the main task");
@@ -2258,7 +2226,7 @@ describe("btw runtime behavior", () => {
     await flushAsyncWork();
 
     expect(record.getIsStreaming()).toBe(false);
-    expect(overlay.statusText.text).toContain("Ready for a follow-up");
+    expect(overlay["statusTextValue"]).toContain("Ready for a follow-up");
     expect(getCustomEntries(harness.entries, "btw-thread-entry")).toHaveLength(1);
     expect(transcriptText(overlay)).toContain("Long-running answer");
 
@@ -2307,7 +2275,7 @@ describe("btw runtime behavior", () => {
     await harness.command("btw", "");
     const reopened = harness.latestOverlayComponent();
     expect(transcriptEntries(reopened)).toEqual([]);
-    expect(transcriptText(reopened)).toContain("No BTW thread yet. Ask a side question to start one.");
+    expect(overlayText(reopened)).toContain("No BTW thread yet. Ask a side question to start one.");
   });
 
   it("keeps the thread after Escape dismissal and restores it on reopen", async () => {
@@ -2334,10 +2302,9 @@ describe("btw runtime behavior", () => {
 
     const reopened = harness.latestOverlayComponent();
     const transcript = transcriptText(reopened);
-    expect(transcript).toContain("You  first question");
-    expect(transcript).toContain("Assistant");
+    expect(transcript).toContain("first question");
     expect(transcript).toContain("First answer");
-    expect(reopened.statusText.text).toContain("Ready for a follow-up");
+    expect(reopened["statusTextValue"]).toContain("Ready for a follow-up");
   });
 
   it("supports an in-place follow-up and preserves both turns in one thread", async () => {
@@ -2357,35 +2324,45 @@ describe("btw runtime behavior", () => {
     expect(threadEntries).toHaveLength(2);
 
     const transcript = transcriptText(overlay);
-    expect(transcript).toContain("You  first question");
+    expect(transcript).toContain("first question");
     expect(transcript).toContain("First answer");
-    expect(transcript).toContain("You  follow-up question");
+    expect(transcript).toContain("follow-up question");
     expect(transcript).toContain("Second answer");
-    expect(overlay.statusText.text).toContain("Ready for a follow-up");
+    expect(overlay["statusTextValue"]).toContain("Ready for a follow-up");
   });
 
   it("maps turn, tool, thinking, and assistant events into transcript entries", async () => {
     const harness = createHarness();
-    promptStreamMock.mockImplementation(async function* () {
-      yield { type: "thinking_delta" as const, delta: "Inspecting package.json" };
-      yield { type: "tool_execution_start" as const, toolName: "read", args: { path: "package.json" } };
-      yield {
-        type: "tool_execution_end" as const,
-        toolName: "read",
-        result: { content: [{ type: "text", text: '{"name":"pi-btw"}' }] },
-      };
-      yield { type: "text_delta" as const, delta: "The package is pi-btw." };
-      yield {
-        type: "done" as const,
-        message: {
-          ...makeAssistantMessage("The package is pi-btw."),
-          content: buildAssistantContent("Inspecting package.json", "The package is pi-btw."),
-        },
-      };
-    });
+    const args = { path: "package.json", offset: 2, limit: 3 };
+    const result = {
+      content: [{ type: "text", text: '{"name":"pi-btw"}' }],
+      details: { totalLines: 12, truncation: { truncated: false } },
+    };
+    const toolCallId = "read-metadata";
+    const toolMessage = {
+      ...makeAssistantMessage(""),
+      content: [
+        { type: "thinking" as const, thinking: "Inspecting package.json" },
+        { type: "toolCall" as const, id: toolCallId, name: "read", arguments: args },
+      ],
+      stopReason: "toolUse" as const,
+    };
+    const answerMessage = makeAssistantMessage("The package is pi-btw.");
 
     await harness.runSessionStart();
-    await harness.command("btw", "read package metadata");
+    await harness.command("btw", "");
+    const { emit } = subSessionRecords[0];
+    const userMessage = { role: "user", content: [{ type: "text", text: "read package metadata" }], timestamp: 1 };
+    emit({ type: "turn_start" });
+    emit({ type: "message_start", message: userMessage });
+    emit({ type: "message_end", message: userMessage });
+    emit({ type: "message_start", message: toolMessage });
+    emit({ type: "message_end", message: toolMessage });
+    emit({ type: "tool_execution_start", toolCallId, toolName: "read", args });
+    emit({ type: "tool_execution_end", toolCallId, toolName: "read", result, isError: false });
+    emit({ type: "message_start", message: answerMessage });
+    emit({ type: "message_end", message: answerMessage });
+    emit({ type: "turn_end", message: answerMessage, toolResults: [] });
 
     const overlay = harness.latestOverlayComponent();
     const entries = transcriptEntries(overlay);
@@ -2393,38 +2370,195 @@ describe("btw runtime behavior", () => {
     expect(entries.map((entry: any) => entry.type)).toEqual([
       "turn-boundary",
       "user-message",
-      "thinking",
+      "assistant-message",
       "tool-call",
       "tool-result",
-      "assistant-text",
+      "assistant-message",
       "turn-boundary",
     ]);
     expect(entries[0]).toMatchObject({ type: "turn-boundary", phase: "start" });
     expect(entries[1]).toMatchObject({ type: "user-message", text: "read package metadata" });
-    expect(entries[2]).toMatchObject({ type: "thinking", text: "Inspecting package.json", streaming: false });
-    expect(entries[3]).toMatchObject({ type: "tool-call", toolName: "read", args: "package.json" });
-    expect(entries[4]).toMatchObject({
-      type: "tool-result",
-      toolName: "read",
-      content: '{"name":"pi-btw"}',
-      truncated: false,
-      isError: false,
-      streaming: false,
+    expect(entries[2]).toMatchObject({ type: "assistant-message", message: toolMessage, streaming: false });
+    expect(entries[3]).toMatchObject({
+      type: "tool-call", toolCallId, toolName: "read", args: "package.json", argsValue: args,
+      argsComplete: true, executionStarted: true,
     });
-    expect(entries[5]).toMatchObject({ type: "assistant-text", text: "The package is pi-btw.", streaming: false });
+    expect(entries[4]).toMatchObject({
+      type: "tool-result", toolCallId, toolName: "read", content: '{"name":"pi-btw"}', resultValue: result,
+      truncated: false, isError: false, streaming: false,
+    });
+    expect(entries[5]).toMatchObject({ type: "assistant-message", message: answerMessage, streaming: false });
     expect(entries[6]).toMatchObject({ type: "turn-boundary", phase: "end" });
+    expect(entries.filter((entry: any) => entry.type === "assistant-message").map((entry: any) => entry.message))
+      .toEqual([toolMessage, answerMessage]);
   });
 
-  it("renders tool, thinking, result, and turn-separator rows in the overlay transcript", async () => {
-    const harness = createHarness([], {
-      theme: {
-        fg: (name: string, text: string) => `<fg:${name}>${text}</fg:${name}>`,
-        bg: (name: string, text: string) => `<bg:${name}>${text}</bg:${name}>`,
-        italic: (text: string) => `<italic>${text}</italic>`,
-        bold: (text: string) => `<bold>${text}</bold>`,
-      },
+  it("keeps whole assistant messages, ignores nested tool events, and preserves partial tool details", async () => {
+    const harness = createHarness();
+    await harness.runSessionStart();
+    await harness.command("btw", "");
+    const record = subSessionRecords[0];
+    const overlay = harness.latestOverlayComponent();
+    const args = { path: "src/index.ts" };
+    const toolCallId = "call-root";
+    const userMessage = { role: "user", content: [{ type: "text" as const, text: "inspect files" }], timestamp: 1 };
+    const firstMessage = {
+      ...makeAssistantMessage(""),
+      content: [
+        { type: "thinking" as const, thinking: "First think" },
+        { type: "text" as const, text: "Planning the read." },
+        { type: "toolCall" as const, id: toolCallId, name: "read", arguments: args },
+      ],
+      stopReason: "toolUse" as const,
+    };
+    const secondMessage = {
+      ...makeAssistantMessage("Done inspecting."),
+      content: [
+        { type: "thinking" as const, thinking: "Second think" },
+        { type: "text" as const, text: "Done inspecting." },
+      ],
+    };
+
+    record.emit({ type: "turn_start" });
+    record.emit({ type: "message_start", message: userMessage });
+    record.emit({ type: "message_end", message: userMessage });
+    record.emit({ type: "message_start", message: firstMessage });
+    record.emit({ type: "message_update", message: firstMessage, assistantMessageEvent: { type: "text_delta", delta: "" } });
+    record.emit({ type: "message_end", message: firstMessage });
+    record.emit({ type: "tool_execution_start", toolCallId, toolName: "read", args });
+
+    const partialDetails = { progress: 1, nested: { keep: true } };
+    const partialResult = { content: [{ type: "text" as const, text: "partial tool output" }], details: partialDetails };
+    record.emit({ type: "tool_execution_update", toolCallId, toolName: "read", partialResult });
+
+    // Child tool events (parentToolCallId) belong to a nested tool run and must not
+    // create rows or overwrite the parent tool's result.
+    record.emit({
+      type: "tool_execution_start", toolCallId: "nested-call", toolName: "grep",
+      args: { pattern: "x" }, parentToolCallId: toolCallId,
     });
-    const longToolResult = ["line 1", "line 2", "x".repeat(420)].join("\n");
+    record.emit({
+      type: "tool_execution_update", toolCallId: "nested-call", toolName: "grep",
+      partialResult: { content: [{ type: "text", text: "NESTED OUTPUT" }] }, parentToolCallId: toolCallId,
+    });
+    record.emit({
+      type: "tool_execution_end", toolCallId: "nested-call", toolName: "grep",
+      result: { content: [{ type: "text", text: "NESTED OUTPUT" }] }, parentToolCallId: toolCallId,
+    });
+
+    let entries = transcriptEntries(overlay);
+    expect(entries.filter((entry: any) => entry.type === "tool-call")).toHaveLength(1);
+    let results = entries.filter((entry: any) => entry.type === "tool-result");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ toolCallId, toolName: "read", content: "partial tool output", streaming: true });
+    expect(results[0].resultValue).toEqual({ content: partialResult.content, details: partialDetails, isError: false });
+    expect(results[0].resultValue.details).toBe(partialDetails);
+    expect(entries.some((entry: any) => entry.toolCallId === "nested-call")).toBe(false);
+
+    overlay.handleInput("\x0f");
+    const partialTranscript = transcriptText(overlay);
+    expect(partialTranscript).toContain("partial tool output");
+    expect(partialTranscript).not.toContain("NESTED OUTPUT");
+
+    const fullOutput = [
+      "final result line 1",
+      "x".repeat(420) + " keeps-full-content",
+      ...Array.from({ length: 8 }, (_, index) => `final result line ${index + 2}`),
+      "FINAL-RAW-SENTINEL",
+    ].join("\n");
+    const finalDetails = { customRenderer: { rows: [1, 2, 3] }, done: true };
+    const finalResult = { content: [{ type: "text" as const, text: fullOutput }], details: finalDetails };
+    record.emit({ type: "tool_execution_end", toolCallId, toolName: "read", result: finalResult, isError: false, durationMs: 42 });
+
+    record.emit({ type: "message_start", message: secondMessage });
+    record.emit({ type: "message_update", message: secondMessage, assistantMessageEvent: { type: "text_delta", delta: "" } });
+    record.emit({ type: "message_end", message: secondMessage });
+    record.emit({ type: "turn_end", message: secondMessage, toolResults: [] });
+
+    entries = transcriptEntries(overlay);
+    expect(entries.map((entry: any) => entry.type)).toEqual([
+      "turn-boundary",
+      "user-message",
+      "assistant-message",
+      "tool-call",
+      "tool-result",
+      "assistant-message",
+      "turn-boundary",
+    ]);
+    const assistants = entries.filter((entry: any) => entry.type === "assistant-message");
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0].turnId).toBe(assistants[1].turnId);
+    expect(assistants[0].message.content.map((part: any) => part.type)).toEqual(["thinking", "text", "toolCall"]);
+    expect(assistants[0].message.content[0]).toEqual({ type: "thinking", thinking: "First think" });
+    expect(assistants[0].message.content[1]).toEqual({ type: "text", text: "Planning the read." });
+    expect(assistants[1].message.content.map((part: any) => part.type)).toEqual(["thinking", "text"]);
+
+    results = entries.filter((entry: any) => entry.type === "tool-result");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ toolCallId, toolName: "read", truncated: true, streaming: false, isError: false });
+    expect(results[0].content.length).toBeLessThan(fullOutput.length);
+    expect(results[0].resultValue).toEqual({
+      content: finalResult.content,
+      details: finalDetails,
+      isError: false,
+      durationMs: 42,
+    });
+    expect(results[0].resultValue.details).toBe(finalDetails);
+
+    const finalTranscript = transcriptText(overlay);
+    expect(finalTranscript).toContain("keeps-full-content");
+    expect(finalTranscript).toContain("FINAL-RAW-SENTINEL");
+    expect(finalTranscript).not.toContain("NESTED OUTPUT");
+    expect(finalTranscript).toContain("First think");
+    expect(finalTranscript).toContain("Done inspecting.");
+  });
+
+  it("starts a new turn when a user message follows a finished assistant without turn_end", async () => {
+    const harness = createHarness();
+    await harness.runSessionStart();
+    await harness.command("btw", "");
+    const record = subSessionRecords[0];
+    const overlay = harness.latestOverlayComponent();
+    const firstUser = { role: "user", content: [{ type: "text" as const, text: "first question" }], timestamp: 1 };
+    const firstAnswer = makeAssistantMessage("First answer");
+    const secondUser = { role: "user", content: [{ type: "text" as const, text: "fallback follow-up" }], timestamp: 2 };
+
+    record.emit({ type: "turn_start" });
+    record.emit({ type: "message_start", message: firstUser });
+    record.emit({ type: "message_end", message: firstUser });
+    record.emit({ type: "message_start", message: firstAnswer });
+    record.emit({ type: "message_end", message: firstAnswer });
+    // No turn_end: the next user message must still start a separate turn.
+    record.emit({ type: "message_start", message: secondUser });
+    record.emit({ type: "message_end", message: secondUser });
+
+    const entries = transcriptEntries(overlay);
+    const starts = entries.filter((entry: any) => entry.type === "turn-boundary" && entry.phase === "start");
+    const ends = entries.filter((entry: any) => entry.type === "turn-boundary" && entry.phase === "end");
+    const users = entries.filter((entry: any) => entry.type === "user-message");
+    const assistants = entries.filter((entry: any) => entry.type === "assistant-message");
+
+    expect(starts).toHaveLength(2);
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).toMatchObject({ turnId: starts[0].turnId, outcome: "completed" });
+    expect(users.map((entry: any) => entry.text)).toEqual(["first question", "fallback follow-up"]);
+    expect(users[1].turnId).toBe(starts[1].turnId);
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0].turnId).toBe(starts[0].turnId);
+    expect(transcriptText(overlay)).toContain("fallback follow-up");
+    expect(transcriptText(overlay)).toContain("First answer");
+  });
+
+  it("renders native tools and thinking without legacy badges or character truncation", async () => {
+    const harness = createHarness();
+    const toolRender = vi.spyOn(ToolExecutionComponent.prototype, "render");
+    const toolResult = vi.spyOn(ToolExecutionComponent.prototype, "updateResult");
+    const longToolResult = [
+      "line 1",
+      "x".repeat(420) + " beyond-400-characters",
+      ...Array.from({ length: 20 }, (_, index) => `result line ${index + 2}`),
+      "final result sentinel",
+    ].join("\n");
 
     promptStreamMock
       .mockImplementationOnce(async function* () {
@@ -2453,20 +2587,37 @@ describe("btw runtime behavior", () => {
     overlay.input.onSubmit?.("second question");
     await flushAsyncWork();
 
+    // Ctrl+O opens the native tool rows so their full result body is rendered.
+    overlay.handleInput("\x0f");
     const transcript = transcriptText(overlay);
-    expect(transcript).toContain("<bg:toolPendingBg>");
-    expect(transcript).toContain("<italic><fg:warning>Inspecting package.json</fg:warning></italic>");
-    expect(transcript).toContain("<bold>read</bold>");
+    expect(toolRender).toHaveBeenCalled();
+    expect(toolResult).toHaveBeenCalledWith(
+      expect.objectContaining({ content: [{ type: "text", text: longToolResult }], isError: false }),
+      expect.anything(),
+    );
+    expect(transcript).toContain("Inspecting package.json");
+    expect(transcript).toContain("read");
     expect(transcript).toContain("package.json");
-    expect(transcript).toContain("↳ result");
-    expect(transcript).toContain("(truncated)");
     expect(transcript).toContain("line 1");
-    expect(transcript).toContain("    <fg:dim>line 1</fg:dim>");
-    expect(transcript).toContain("────────────────");
+    expect(transcript).toContain("beyond-400-characters");
+    expect(transcript).not.toContain("↳ result");
+    expect(transcript).not.toContain("(truncated)");
     expect(transcript).toContain("second question");
     expect(transcript).toContain("Second answer");
-    expect(transcript.indexOf("↳ result")).toBeGreaterThan(transcript.indexOf("<bold>read</bold>"));
-    expect(transcript.indexOf("second question")).toBeGreaterThan(transcript.indexOf("────────────────"));
+    expect(transcript.indexOf("second question")).toBeGreaterThan(transcript.indexOf("package.json"));
+
+    const component = findLatest(toolRender.mock.contexts, (instance: any) =>
+      instance.toolName === "read" && instance.result?.content?.some((content: any) => content.text === longToolResult),
+    );
+    component.setExpanded(false);
+    const collapsed = stripVTControlCharacters(component.render(120).join("\n"));
+    expect(collapsed).not.toContain("final result sentinel");
+    component.setExpanded(true);
+    const expanded = stripVTControlCharacters(component.render(120).join("\n"));
+    expect(expanded).toContain("final result sentinel");
+    expect(expanded).toContain("beyond-400-characters");
+    toolRender.mockRestore();
+    toolResult.mockRestore();
   });
 
   it("transcript inspection exposes streaming and failure state", async () => {
@@ -2480,8 +2631,8 @@ describe("btw runtime behavior", () => {
 
     const overlay = harness.latestOverlayComponent();
     let entries = transcriptEntries(overlay);
-    expect(findLatest(entries, (entry: any) => entry.type === "thinking")).toMatchObject({
-      text: "Inspecting package.json",
+    expect(findLatest(entries, (entry: any) => entry.type === "assistant-message")).toMatchObject({
+      message: { content: [{ type: "thinking", thinking: "Inspecting package.json" }] },
       streaming: true,
     });
     expect(findLatest(entries, (entry: any) => entry.type === "tool-call")).toMatchObject({
@@ -2497,15 +2648,16 @@ describe("btw runtime behavior", () => {
     expect(findLatest(entries, (entry: any) => entry.type === "tool-result")).toMatchObject({
       toolName: "read",
       content: '{"name":"pi-btw"}',
+      resultValue: { content: [{ type: "text", text: '{"name":"pi-btw"}' }] },
       truncated: false,
       isError: false,
       streaming: false,
     });
-    expect(findLatest(entries, (entry: any) => entry.type === "assistant-text")).toMatchObject({
-      text: "❌ Sub-session prompt exploded",
+    expect(findLatest(entries, (entry: any) => entry.type === "assistant-message")).toMatchObject({
+      message: { stopReason: "error", errorMessage: "Sub-session prompt exploded" },
       streaming: false,
     });
-    expect(overlay.statusText.text).toContain("Request failed. Thread preserved for retry or follow-up.");
+    expect(overlay["statusTextValue"]).toContain("Request failed. Thread preserved for retry or follow-up.");
   });
 
   it("updates assistant transcript text incrementally while the BTW response streams", async () => {
@@ -2518,20 +2670,20 @@ describe("btw runtime behavior", () => {
     await flushAsyncWork();
 
     const overlay = harness.latestOverlayComponent();
-    expect(findLatest(transcriptEntries(overlay), (entry: any) => entry.type === "assistant-text")).toMatchObject({
-      text: "Partial",
+    expect(findLatest(transcriptEntries(overlay), (entry: any) => entry.type === "assistant-message")).toMatchObject({
+      message: { content: [{ type: "text", text: "Partial" }] },
       streaming: true,
     });
-    expect(overlay.statusText.text).toContain("streaming");
+    expect(overlay["statusTextValue"]).toContain("streaming");
 
     blocking.release();
     await pendingCommand;
 
-    expect(findLatest(transcriptEntries(overlay), (entry: any) => entry.type === "assistant-text")).toMatchObject({
-      text: "Partial answer",
+    expect(findLatest(transcriptEntries(overlay), (entry: any) => entry.type === "assistant-message")).toMatchObject({
+      message: { content: [{ type: "text", text: "Partial answer" }], stopReason: "stop" },
       streaming: false,
     });
-    expect(overlay.statusText.text).toContain("Ready for a follow-up");
+    expect(overlay["statusTextValue"]).toContain("Ready for a follow-up");
   });
 
   it("clears the modal composer after a follow-up is submitted", async () => {
@@ -2551,25 +2703,24 @@ describe("btw runtime behavior", () => {
     expect(overlay.getDraft()).toBe("");
   });
 
-  it("applies distinct theme treatment to user and assistant transcript rows", async () => {
-    const harness = createHarness([], {
-      theme: {
-        fg: (name: string, text: string) => `<fg:${name}>${text}</fg:${name}>`,
-        bg: (name: string, text: string) => `<bg:${name}>${text}</bg:${name}>`,
-        italic: (text: string) => `<italic>${text}</italic>`,
-        bold: (text: string) => `<bold>${text}</bold>`,
-      },
-    });
+  it("uses native user and assistant message components with the real theme", async () => {
+    const harness = createHarness();
+    const userRender = vi.spyOn(UserMessageComponent.prototype, "render");
+    const assistantRender = vi.spyOn(AssistantMessageComponent.prototype, "render");
     promptStreamMock.mockImplementation(() => streamAnswer("First answer"));
 
     await harness.runSessionStart();
     await harness.command("btw", "first question");
 
     const transcript = transcriptText(harness.latestOverlayComponent());
-    expect(transcript).toContain("<bg:userMessageBg>");
-    expect(transcript).toContain("<fg:accent>");
-    expect(transcript).toContain("<bg:customMessageBg>");
-    expect(transcript).toContain("<fg:success>");
+    expect(userRender).toHaveBeenCalled();
+    expect(assistantRender).toHaveBeenCalled();
+    expect(transcript).toContain("first question");
+    expect(transcript).toContain("First answer");
+    expect(transcript).not.toContain("You  ");
+    expect(transcript).not.toContain("Assistant");
+    userRender.mockRestore();
+    assistantRender.mockRestore();
   });
 
   it("renders overlay Markdown and wraps tables within the dialog width", async () => {
@@ -2589,9 +2740,9 @@ describe("btw runtime behavior", () => {
     await harness.command("btw", "show the result");
 
     const rendered = harness.latestOverlayComponent().render(72);
-    const transcript = rendered.join("\n");
-    expect(transcript).toContain("<heading><bold>Result</bold></heading>");
-    expect(transcript).toContain("<bold>Ready</bold>");
+    const transcript = stripVTControlCharacters(rendered.join("\n"));
+    expect(transcript).toContain("Result");
+    expect(transcript).toContain("Ready");
     expect(transcript).toContain("Tables");
     expect(transcript).toContain("┌");
     expect(transcript).toContain("┘");
@@ -2599,7 +2750,7 @@ describe("btw runtime behavior", () => {
     expect(rendered.every((line: string) => visibleWidth(line) <= 72)).toBe(true);
 
     const resized = harness.latestOverlayComponent().render(90);
-    expect(resized.join("\n")).toContain("Tables wrap in narrow overlays");
+    expect(stripVTControlCharacters(resized.join("\n"))).toContain("Tables wrap in narrow overlays");
     expect(resized.every((line: string) => visibleWidth(line) <= 90)).toBe(true);
   });
 
@@ -2625,10 +2776,10 @@ describe("btw runtime behavior", () => {
       harness.baseCtx.ui.theme,
     );
     const markdown = box.children[1];
-    const rendered = markdown.render(56).join("\n");
+    const rendered = stripVTControlCharacters(markdown.render(56).join("\n"));
 
-    expect(rendered).toContain("<bold>Question</bold>");
-    expect(rendered).toContain("<bold>Answer</bold>");
+    expect(rendered).toContain("Question");
+    expect(rendered).toContain("Answer");
     expect(rendered).toContain("Saved note");
     expect(rendered).toContain("┌");
     expect(rendered).toContain("┘");
@@ -2645,7 +2796,7 @@ describe("btw runtime behavior", () => {
     expect(getCustomEntries(harness.entries, "btw-thread-entry")).toHaveLength(0);
     const overlay = harness.latestOverlayComponent();
     overlay.refresh();
-    expect(overlay.statusText.text).toContain("No credentials available for test-provider/test-model.");
+    expect(overlay["statusTextValue"]).toContain("No credentials available for test-provider/test-model.");
     expect(harness.notifications.at(-1)).toEqual({
       message: "No credentials available for test-provider/test-model.",
       type: "error",
@@ -2754,7 +2905,7 @@ describe("btw runtime behavior", () => {
 
     const overlay = harness.latestOverlayComponent();
     overlay.refresh();
-    expect(overlay.hintsText.text).toContain("Alt+w width");
+    expect(overlay["hintsTextValue"]).toContain("Alt+w width");
   });
 
   it("toggles the overlay between window and full-width layouts on Alt+w, preserving the draft", async () => {
@@ -2777,7 +2928,7 @@ describe("btw runtime behavior", () => {
     });
     const fullOverlay = harness.latestOverlayComponent();
     expect(fullOverlay.getDraft()).toBe("kept draft");
-    expect(fullOverlay.statusText.text).toContain("Full-width mode");
+    expect(fullOverlay["statusTextValue"]).toContain("Full-width mode");
 
     // Alt+w again restores the framed window layout.
     await harness.shortcut("alt+w");
@@ -2789,7 +2940,7 @@ describe("btw runtime behavior", () => {
     });
     const windowOverlay = harness.latestOverlayComponent();
     expect(windowOverlay.getDraft()).toBe("kept draft");
-    expect(windowOverlay.statusText.text).toContain("Window mode");
+    expect(windowOverlay["statusTextValue"]).toContain("Window mode");
   });
 
   it("keeps the box frame in window mode but drops all border glyphs in full-width mode", async () => {
@@ -2886,7 +3037,7 @@ describe("btw runtime behavior", () => {
     expect(overlay.focused).toBe(true);
 
     overlay.refresh();
-    expect(overlay.hintsText.text).toContain("Super+/");
+    expect(overlay["hintsTextValue"]).toContain("Super+/");
   });
 
   it("marks the overlay input focused when BTW opens so the cursor stays in the composer", async () => {
@@ -2941,7 +3092,7 @@ describe("btw runtime behavior", () => {
     expect(firstRender.length).toBe(secondRender.length);
   });
 
-  it("keeps the BTW modal at a fixed reading height, uses one frame color, and preserves stacked body indentation", async () => {
+  it("keeps the BTW modal at a fixed reading height and uses one frame color around native content", async () => {
     const harness = createHarness([], {
       theme: {
         fg: (name: string, text: string) => `<fg:${name}>${text}</fg:${name}>`,
@@ -2966,15 +3117,22 @@ describe("btw runtime behavior", () => {
     const inputLine = populatedLines.at(-3);
     const assistantBodyLine = populatedLines.find((line: string) => line.includes("First answer"));
 
+    expect(emptyStateLine).toBeDefined();
+    expect(inputLine).toBeDefined();
+    expect(assistantBodyLine).toBeDefined();
+    // Native content rows carry ANSI resets between the frame border and the row body.
+    const emptyStateText = stripVTControlCharacters(emptyStateLine!);
+    const inputText = stripVTControlCharacters(inputLine!);
+
     expect(emptyLines.length).toBe(populatedLines.length);
     expect(emptyLines[0]).toContain("<fg:border>┌");
     expect(emptyLines[0]).not.toContain("<fg:accent>┌");
     expect(emptyLines.at(-1)).toContain("<fg:border>└");
     expect(emptyLines.at(-1)).not.toContain("<fg:accent>└");
-    expect(emptyStateLine).toContain("<fg:border>│</fg:border><fg:dim>No BTW thread yet.");
-    expect(emptyStateLine).not.toContain("<fg:border>│</fg:border> <fg:dim>No BTW thread yet.");
-    expect(assistantBodyLine).toContain("<fg:border>│</fg:border>    First answer");
-    expect(inputLine).toContain("<fg:border>│</fg:border>> ");
+    expect(emptyStateText).toContain("<fg:border>│</fg:border><fg:dim>No BTW thread yet.");
+    expect(emptyStateText).not.toContain("<fg:border>│</fg:border> <fg:dim>No BTW thread yet.");
+    expect(stripVTControlCharacters(assistantBodyLine!)).toMatch(/<fg:border>│<\/fg:border>\s*First answer/);
+    expect(inputText).toContain("<fg:border>│</fg:border>> ");
     expect(inputLine).not.toContain("\x1b_pi:c\x07");
   });
 
@@ -3017,9 +3175,9 @@ describe("btw runtime behavior", () => {
 
     const postResetOverlay = harness.latestOverlayComponent();
     const postResetTranscript = transcriptText(postResetOverlay);
-    expect(postResetTranscript).not.toContain("You  first question");
+    expect(postResetTranscript).not.toContain("first question");
     expect(postResetTranscript).not.toContain("First answer");
-    expect(postResetTranscript).toContain("You  replacement question");
+    expect(postResetTranscript).toContain("replacement question");
     expect(postResetTranscript).toContain("Replacement answer");
 
     await harness.command("btw:new", "");
@@ -3032,9 +3190,9 @@ describe("btw runtime behavior", () => {
     expect(threadEntries).toHaveLength(2);
 
     const overlay = harness.latestOverlayComponent();
-    const transcript = transcriptText(overlay);
-    expect(transcript).toContain("No BTW thread yet. Ask a side question to start one.");
-    expect(overlay.statusText.text).toContain("Started a fresh BTW thread.");
+    expect(transcriptEntries(overlay)).toEqual([]);
+    expect(overlayText(overlay)).toContain("No BTW thread yet. Ask a side question to start one.");
+    expect(overlay["statusTextValue"]).toContain("Started a fresh BTW thread.");
   });
 
   it("switching between /btw:tangent and /btw appends reset markers and tangent requests omit inherited main-session conversation", async () => {
@@ -3077,9 +3235,9 @@ describe("btw runtime behavior", () => {
 
     const overlay = harness.latestOverlayComponent();
     const transcript = transcriptText(overlay);
-    expect(transcript).toContain("You  contextual again");
+    expect(transcript).toContain("contextual again");
     expect(transcript).toContain("default:contextual again");
-    expect(transcript).not.toContain("You  tangent start");
+    expect(transcript).not.toContain("tangent start");
     expect(transcript).not.toContain("default:tangent start");
   });
 
@@ -3094,8 +3252,8 @@ describe("btw runtime behavior", () => {
     await harness.runEvent("session_start");
     await harness.command("btw", "");
     let overlay = harness.latestOverlayComponent();
-    expect(transcriptText(overlay)).toContain("You  new q");
-    expect(transcriptText(overlay)).not.toContain("You  old q");
+    expect(transcriptText(overlay)).toContain("new q");
+    expect(transcriptText(overlay)).not.toContain("old q");
 
     await harness.command("btw", "restore-visible");
     expect(harness.overlayHandles).toHaveLength(1);
@@ -3116,7 +3274,7 @@ describe("btw runtime behavior", () => {
     await harness.runEvent("session_start");
     await harness.command("btw", "");
     overlay = harness.latestOverlayComponent();
-    expect(transcriptText(overlay)).toContain("No BTW thread yet. Ask a side question to start one.");
+    expect(overlayText(overlay)).toContain("No BTW thread yet. Ask a side question to start one.");
 
     harness.entries.push({
       type: "custom",
@@ -3128,9 +3286,9 @@ describe("btw runtime behavior", () => {
     await harness.command("btw", "");
     overlay = harness.latestOverlayComponent();
     const transcript = transcriptText(overlay);
-    expect(transcript).toContain("You  post-clear q");
+    expect(transcript).toContain("post-clear q");
     expect(transcript).toContain("post-clear a");
-    expect(transcript).not.toContain("You  new q");
+    expect(transcript).not.toContain("new q");
   });
 
   it("/btw:clear during active tool execution aborts the prompt, disposes the sub-session, and leaves no partial thread", async () => {
@@ -3145,7 +3303,7 @@ describe("btw runtime behavior", () => {
     const overlay = harness.latestOverlayComponent();
     const overlayHandle = harness.overlayHandles.at(-1);
     const activeRecord = subSessionRecords[0];
-    expect(overlay.statusText.text).toContain("running tool: read");
+    expect(overlay["statusTextValue"]).toContain("running tool: read");
     expect(activeRecord.getIsStreaming()).toBe(true);
 
     await harness.command("btw:clear", "");
@@ -3166,7 +3324,7 @@ describe("btw runtime behavior", () => {
     expect(getCustomEntries(harness.entries, "btw-thread-entry")).toHaveLength(0);
 
     await harness.command("btw", "");
-    expect(transcriptText(harness.latestOverlayComponent())).toContain("No BTW thread yet. Ask a side question to start one.");
+    expect(overlayText(harness.latestOverlayComponent())).toContain("No BTW thread yet. Ask a side question to start one.");
   });
 
   it("restore behavior is consistent across session_start and session_tree", async () => {
@@ -3181,9 +3339,9 @@ describe("btw runtime behavior", () => {
       await harness.command("btw", "");
       const overlay = harness.latestOverlayComponent();
       const transcript = transcriptText(overlay);
-      expect(transcript).toContain("You  restored q");
+      expect(transcript).toContain("restored q");
       expect(transcript).toContain("restored a");
-      expect(overlay['modeText'].text).toContain("BTW tangent");
+      expect(overlay["modeTextValue"]).toContain("BTW tangent");
     }
   });
 
@@ -3226,7 +3384,7 @@ describe("btw runtime behavior", () => {
 
     await harness.command("btw", "");
     const reopened = harness.latestOverlayComponent();
-    expect(transcriptText(reopened)).toContain("No BTW thread yet. Ask a side question to start one.");
+    expect(overlayText(reopened)).toContain("No BTW thread yet. Ask a side question to start one.");
   });
 
   it("/btw:inject while the main session is busy delivers to the main session as a follow-up", async () => {
@@ -3263,8 +3421,8 @@ describe("btw runtime behavior", () => {
     expect(record.session.abort).not.toHaveBeenCalled();
     expect(record.getListenerCount()).toBe(1);
     expect(overlayHandle?.isHidden()).toBe(false);
-    expect(overlay.statusText.text).toContain("Ready. Enter submits; Escape dismisses without clearing.");
-    expect(transcriptText(overlay)).toContain("No BTW thread yet. Ask a side question to start one.");
+    expect(overlay["statusTextValue"]).toContain("Ready. Enter submits; Escape dismisses without clearing.");
+    expect(overlayText(overlay)).toContain("No BTW thread yet. Ask a side question to start one.");
     expect(harness.notifications.at(-1)).toEqual({
       message: "No BTW thread to inject.",
       type: "warning",
@@ -3323,7 +3481,7 @@ describe("btw runtime behavior", () => {
 
     await harness.command("btw", "");
     const reopened = harness.latestOverlayComponent();
-    expect(transcriptText(reopened)).toContain("No BTW thread yet. Ask a side question to start one.");
+    expect(overlayText(reopened)).toContain("No BTW thread yet. Ask a side question to start one.");
   });
 
   it("summarize failure preserves BTW thread state and keeps the overlay recoverable", async () => {
@@ -3355,8 +3513,8 @@ describe("btw runtime behavior", () => {
 
     const overlay = harness.latestOverlayComponent();
     overlay.refresh();
-    expect(overlay.statusText.text).toContain("Summarize failed. Thread preserved for retry or injection.");
-    expect(transcriptText(overlay)).toContain("You  first question");
+    expect(overlay["statusTextValue"]).toContain("Summarize failed. Thread preserved for retry or injection.");
+    expect(transcriptText(overlay)).toContain("first question");
     expect(transcriptText(overlay)).toContain("First answer");
     expect(harness.notifications.at(-1)).toEqual({
       message: "Summary model exploded",
@@ -3382,11 +3540,11 @@ describe("btw runtime behavior", () => {
     expect(resets.at(-1)?.data).toMatchObject({ mode: "contextual" });
 
     const transcript = transcriptText(overlay);
-    expect(transcript).not.toContain("You  first question");
+    expect(transcript).not.toContain("first question");
     expect(transcript).not.toContain("First answer");
-    expect(transcript).toContain("You  replacement question");
+    expect(transcript).toContain("replacement question");
     expect(transcript).toContain("Replacement answer");
-    expect(overlay['modeText'].text).toContain("BTW");
+    expect(overlay["modeTextValue"]).toContain("BTW");
   });
 
   it("in-modal /btw:tangent reuses command semantics by switching modes and dropping inherited main-session context", async () => {
@@ -3419,10 +3577,10 @@ describe("btw runtime behavior", () => {
     expect(tangentTexts).not.toContain("main session task");
 
     const transcript = transcriptText(overlay);
-    expect(transcript).toContain("You  tangent start");
+    expect(transcript).toContain("tangent start");
     expect(transcript).toContain("default:tangent start");
-    expect(transcript).not.toContain("You  contextual start");
-    expect(overlay['modeText'].text).toContain("BTW tangent");
+    expect(transcript).not.toContain("contextual start");
+    expect(overlay["modeTextValue"]).toContain("BTW tangent");
   });
 
   it("in-modal /btw:inject reuses command semantics by handing off to the main session and dismissing the overlay", async () => {
@@ -3473,8 +3631,8 @@ describe("btw runtime behavior", () => {
     expect(getCustomEntries(harness.entries, "btw-thread-reset")).toHaveLength(resetCountBefore);
     expect(getCustomEntries(harness.entries, "btw-thread-entry")).toHaveLength(2);
     expect(harness.notifications.some((entry) => entry.message.includes("Unsupported slash input in BTW"))).toBe(false);
-    expect(overlay.statusText.text).toContain("Ready for a follow-up");
-    expect(transcriptText(overlay)).toContain("You  /plan do something else");
+    expect(overlay["statusTextValue"]).toContain("Ready for a follow-up");
+    expect(transcriptText(overlay)).toContain("/plan do something else");
     expect(transcriptText(overlay)).toContain("Slash answer");
   });
 
@@ -3505,11 +3663,12 @@ describe("btw runtime behavior", () => {
     expect(getCustomEntries(harness.entries, "btw-thread-entry")).toHaveLength(1);
     expect(getCustomEntries(harness.entries, "btw-thread-reset")).toHaveLength(0);
     expect(harness.sentUserMessages).toHaveLength(0);
-    expect(overlay.statusText.text).toContain("Request failed. Thread preserved for retry or follow-up.");
-    expect(transcriptText(overlay)).toContain("You  first question");
+    expect(overlay["statusTextValue"]).toContain("Request failed. Thread preserved for retry or follow-up.");
+    expect(transcriptText(overlay)).toContain("first question");
     expect(transcriptText(overlay)).toContain("First answer");
-    expect(transcriptText(overlay)).toContain("You  /plan fail loudly");
-    expect(transcriptText(overlay)).toContain("❌ Slash dispatch exploded");
+    expect(transcriptText(overlay)).toContain("/plan fail loudly");
+    expect(transcriptText(overlay)).toContain("Error: Slash dispatch exploded");
+    expect(transcriptText(overlay)).not.toContain("❌");
     expect(harness.notifications.at(-1)).toEqual({
       message: "Slash dispatch exploded",
       type: "error",

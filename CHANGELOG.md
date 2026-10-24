@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## [0.9.0-fork.1] - 2026-10-24
+
+The jrhuebers fork targets Pi 1.4.0 through 1.x and is installed from Git, not the upstream npm package.
+
+### Added
+
+- Native Pi user, assistant, thinking, and tool transcript components inside BTW, following pi-codex-subagents' composition approach.
+- Ctrl+O tool expansion and Ctrl+T thinking visibility, with support for configured application bindings.
+- Whole assistant-message snapshots, full tool arguments/results/details, child extension renderer resolution, and execution timing in the live overlay.
+- Real fullscreen wheel-routing regression tests and native-renderer coverage.
+
+### Fixed
+
+- Normalized mouse-wheel events over BTW no longer fall through to the underlying main-session viewport, including at scroll limits and with an empty transcript.
+- Partial tool results refresh the overlay; nested tool calls do not create duplicate standalone rows.
+- Native content is not rewrapped or artificially indented; prompt-zone markers are stripped and message backgrounds are isolated from overlay borders.
+
+### Unchanged
+
+- Hidden-thread persistence, read-only tool boundaries, context inheritance, and injection semantics. Historical saved exchanges cannot reconstruct intermediate content that upstream did not persist.
+
 ## [0.8.0] - 2026-10-10
 
 Supports Pi 0.85.1 through 1.x. Tested with Pi 0.85.1, 0.99.2, and 1.1.0.

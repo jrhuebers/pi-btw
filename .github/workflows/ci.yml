@@ -25,7 +25,7 @@ jobs:
       - name: Resolve compatibility version
         if: matrix.pi != 'locked'
         env:
-          PI_VERSION: ${{ matrix.pi == 'minimum' && '0.85.1' || 'latest' }}
+          PI_VERSION: ${{ matrix.pi == 'minimum' && '1.4.0' || 'latest' }}
         run: >-
           npm install --package-lock-only --ignore-scripts --save-dev --save-exact
           "@earendil-works/pi-ai@$PI_VERSION"

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { initTheme, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS, visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { BtwOverlayComponent, BTW_COMMANDS } from "../extensions/btw";
+import { BtwTranscriptRenderer } from "../extensions/btw-transcript";
 
 initTheme("dark", false);
 
@@ -25,6 +26,41 @@ const up = "\x1b[A";
 const escape = "\x1b";
 
 describe("BTW composer completion with real Pi input", () => {
+  it("routes Ctrl+O and Ctrl+T to native transcript controls without submitting", () => {
+    const tools = vi.spyOn(BtwTranscriptRenderer.prototype, "setExpanded");
+    const thinking = vi.spyOn(BtwTranscriptRenderer.prototype, "setHideThinking");
+    try {
+      const { overlay, submit, dismiss } = fixture();
+      overlay.handleInput("\x0f");
+      overlay.handleInput("\x14");
+      expect(tools).toHaveBeenLastCalledWith(true);
+      expect(thinking).toHaveBeenLastCalledWith(true);
+      overlay.handleInput("\x0f");
+      overlay.handleInput("\x14");
+      expect(tools).toHaveBeenLastCalledWith(false);
+      expect(thinking).toHaveBeenLastCalledWith(false);
+      expect(submit).not.toHaveBeenCalled();
+      expect(dismiss).not.toHaveBeenCalled();
+    } finally {
+      tools.mockRestore();
+      thinking.mockRestore();
+    }
+  });
+
+  it("clears native component caches on child-session replacement without losing the composer", () => {
+    const reset = vi.spyOn(BtwTranscriptRenderer.prototype, "dispose");
+    try {
+      const { overlay } = fixture();
+      overlay.setDraft("unsent question");
+      overlay.resetTranscriptRendering();
+      expect(reset).toHaveBeenCalledTimes(1);
+      expect(overlay.getDraft()).toBe("unsent question");
+      expect(overlay.render(80).length).toBeGreaterThan(0);
+    } finally {
+      reset.mockRestore();
+    }
+  });
+
   it("opens from typed slash, filters, navigates, and accepts without submitting", () => {
     const { overlay, submit } = fixture();
     overlay.handleInput("/");

@@ -1,10 +1,10 @@
 # pi-btw
 
-A small [pi](https://github.com/earendil-works/pi-mono) extension that adds a `/btw` side conversation channel.
+A [Pi](https://github.com/earendil-works/pi) extension that adds a `/btw` side conversation channel. This is the [jrhuebers fork](https://github.com/jrhuebers/pi-btw) of [Dan Bachelder's pi-btw](https://github.com/dbachelder/pi-btw), retaining the original MIT license and history.
 
 `/btw` opens a real pi sub-session with coding-tool access, and it runs immediately even while the main agent is still busy.
 
-![BTW overlay example](docs/btw-overlay.png)
+The fork uses Pi's native user, assistant, thinking, and tool components inside the floating overlay, following the composition approach used by [pi-codex-subagents](https://github.com/jrhuebers/pi-codex-subagents).
 
 ## What it does
 
@@ -23,23 +23,18 @@ A small [pi](https://github.com/earendil-works/pi-mono) extension that adds a `/
 
 ## Install
 
-pi-btw supports Pi 0.85.1 through 1.x.
+This fork targets Pi 1.4.0 through 1.x. Development dependencies are locked to Pi 1.4.0; CI also checks the minimum supported and latest published releases. Use a Node.js version supported by your Pi runtime.
 
-Development dependencies target Pi 0.99.2. CI runs the tests and typecheck
-against the locked dependencies, Pi 0.85.1, and the latest published Pi release
-on each PR and weekly. Pi 0.99.2 requires Node.js 22.19.0 or newer.
+### From the fork
 
-### From npm (after publish)
+If you previously installed the upstream npm package, remove its declaration first to avoid duplicate command registrations:
 
 ```bash
-pi install npm:pi-btw
+pi remove npm:pi-btw
+pi install git:github.com/jrhuebers/pi-btw
 ```
 
-### From git
-
-```bash
-pi install git:github.com/dbachelder/pi-btw
-```
+The upstream `npm:pi-btw` package does not contain the fork's changes. This fork is distributed through Git, not published over the upstream npm name.
 
 Then reload pi:
 
@@ -91,6 +86,17 @@ pi install /absolute/path/to/pi-btw
 - alias for `/btw`, matching the equivalent command in Codex
 - shares the same thread, overlay, persistence, model, and thinking settings as `/btw`
 - `/btw` stays canonical; lifecycle commands remain under the `/btw:*` namespace, so there is no `/side:new` or `/side:clear`
+
+## Native transcript
+
+- User messages use Pi's full-width message background and Markdown rendering; assistant text uses the normal transcript styling rather than role badges.
+- Thinking uses Pi's native thinking appearance, visible by default. Ctrl+T toggles it; configured `app.thinking.toggle` bindings are also accepted.
+- Tool calls and results use Pi's native components, including built-in read summaries, Bash output, edit diffs, pending/error states, and child-extension renderer overrides. Ctrl+O toggles expanded tool output; configured `app.tools.expand` bindings are also accepted.
+- Live assistant messages retain their complete content order, including alternating thinking/text blocks. Tool arguments, result details, and execution durations reach native renderers without BTW's previous 400-character display cutoff.
+- Mouse-wheel events over the overlay scroll its transcript, including at scroll boundaries, without scrolling the main session underneath. Scrolling outside the overlay still belongs to the main session. The legacy raw-input path is retained for regular mode.
+- Native rows own their wrapping, spacing, and backgrounds; the overlay does not rewrap or indent them a second time. Prompt-zone escape markers are removed before composition.
+
+This is a transcript view, not a second interactive Pi client: tool/thinking expansion is controlled by keyboard shortcuts rather than clicking individual rows, and inline tool-result images are disabled. Child-session UI dialogs remain headless. Existing persisted BTW exchanges still restore their saved question/final answer/thinking, but cannot reconstruct historical intermediate messages or tool results that upstream never saved. This change does not alter the hidden-thread persistence format, model/tool permissions, or injection behavior.
 
 ## Overlay controls
 
