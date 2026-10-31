@@ -90,22 +90,22 @@ function expectOnScreen(g: BtwWindowGeometry, columns: number, rows: number): vo
 }
 
 describe("BtwWindowGeometry defaults", () => {
-  it("matches the previous framed window at the default 100x30 viewport", () => {
+  it("matches the enlarged framed window at the default 100x30 viewport", () => {
     const g = new BtwWindowGeometry();
     g.updateViewport(100, 30);
 
-    // Centered framed window: 78 columns wide, 78% height, top margin 1.
-    expect(g.getBounds()).toEqual({ col: 11, row: 1, width: 78, height: 23 });
-    expect(g.getHeight()).toBe(23);
+    // Centered framed window: 88% width, 85% height, top margin 1.
+    expect(g.getBounds()).toEqual({ col: 6, row: 1, width: 88, height: 25 });
+    expect(g.getHeight()).toBe(25);
     expectOnScreen(g, 100, 30);
   });
 
-  it("uses max(72, 78%) width and a 78% height clamped to the screen", () => {
+  it("uses max(72, 88%) width and an 85% height clamped to the screen", () => {
     const g = geometry(120, 40);
 
-    // floor(120 * 0.78) = 93, floor(40 * 0.78) = 31, centered horizontally, top margin 1.
-    expect(g.getBounds()).toEqual({ col: 13, row: 1, width: 93, height: 31 });
-    expect(g.getHeight()).toBe(31);
+    // floor(120 * 0.88) = 105, floor(40 * 0.85) = 34, centered horizontally, top margin 1.
+    expect(g.getBounds()).toEqual({ col: 7, row: 1, width: 105, height: 34 });
+    expect(g.getHeight()).toBe(34);
   });
 
   it("fits a small terminal instead of overflowing it", () => {
@@ -117,22 +117,23 @@ describe("BtwWindowGeometry defaults", () => {
     expectOnScreen(g, 30, 10);
   });
 
-  it("caps the default height at 32 rows", () => {
+  it("caps the default height at 40 rows with no legacy 32-row cap", () => {
     const g = geometry(100, 60);
 
-    expect(g.getBounds().height).toBe(32);
-    expect(g.getHeight()).toBe(32);
+    expect(g.getBounds().height).toBe(40);
+    expect(g.getHeight()).toBe(40);
+    expect(g.getHeight()).toBeGreaterThan(32);
   });
 
   it("switches to full available columns without side borders", () => {
     const g = geometry(100, 30);
 
     g.setFullWidth(true);
-    expect(g.getBounds()).toEqual({ col: 0, row: 1, width: 100, height: 23 });
-    expect(g.getHeight()).toBe(23);
+    expect(g.getBounds()).toEqual({ col: 0, row: 1, width: 100, height: 25 });
+    expect(g.getHeight()).toBe(25);
 
     g.setFullWidth(false);
-    expect(g.getBounds()).toEqual({ col: 11, row: 1, width: 78, height: 23 });
+    expect(g.getBounds()).toEqual({ col: 6, row: 1, width: 88, height: 25 });
   });
 });
 
@@ -177,11 +178,11 @@ describe("BtwWindowGeometry overlay options", () => {
     expect(typeof visible).toBe("function");
     // Pi calls visible(termWidth, termHeight) each render before resolving the layout.
     expect(visible!(120, 40)).toBe(true);
-    expect(g.getBounds()).toEqual({ col: 13, row: 1, width: 93, height: 31 });
-    expect(g.options.width).toBe(93);
-    expect(g.options.maxHeight).toBe(31);
+    expect(g.getBounds()).toEqual({ col: 7, row: 1, width: 105, height: 34 });
+    expect(g.options.width).toBe(105);
+    expect(g.options.maxHeight).toBe(34);
     expect(g.options.row).toBe(1);
-    expect(g.options.col).toBe(13);
+    expect(g.options.col).toBe(7);
   });
 });
 
@@ -192,9 +193,11 @@ describe("BtwWindowGeometry pointer resizing", () => {
 
     expect(g.beginResize(press(start, start.width - 1, midY(start)))).toBe(true);
     expect(g.isResizing).toBe(true);
-    expect(g.dragResize(drag(rightEdge(start) + 10, start.row + midY(start), start))).toBe(true);
+    // Only 6 columns of right margin exist at the default viewport, so keep the
+    // delta inside the screen instead of clamping against it.
+    expect(g.dragResize(drag(rightEdge(start) + 5, start.row + midY(start), start))).toBe(true);
 
-    expect(g.getBounds()).toEqual({ ...start, width: start.width + 10 });
+    expect(g.getBounds()).toEqual({ ...start, width: start.width + 5 });
     g.endResize();
     expect(g.isResizing).toBe(false);
   });
@@ -230,12 +233,15 @@ describe("BtwWindowGeometry pointer resizing", () => {
     const start = g.getBounds();
 
     expect(g.beginResize(press(start, midX(start), start.height - 1))).toBe(true);
-    g.dragResize(drag(start.col + midX(start), bottomEdge(start) + 5, start));
+    // Only 4 rows of bottom margin exist at the default viewport, so keep the
+    // delta inside the screen instead of clamping against it.
+    g.dragResize(drag(start.col + midX(start), bottomEdge(start) + 3, start));
 
-    expect(g.getBounds()).toEqual({ ...start, height: start.height + 5 });
+    expect(g.getBounds()).toEqual({ ...start, height: start.height + 3 });
   });
 
   it("resizes from every corner while keeping the opposite corner fixed", () => {
+    // Grow deltas stay within the 6-column / 4-row margins of the default viewport.
     const topLeft = geometry();
     const topLeftStart = topLeft.getBounds();
     expect(topLeft.beginResize(press(topLeftStart, 0, 0))).toBe(true);
@@ -251,33 +257,33 @@ describe("BtwWindowGeometry pointer resizing", () => {
     const topRight = geometry();
     const topRightStart = topRight.getBounds();
     expect(topRight.beginResize(press(topRightStart, topRightStart.width - 1, 0))).toBe(true);
-    topRight.dragResize(drag(rightEdge(topRightStart) + 10, topRightStart.row + 10, topRightStart));
+    topRight.dragResize(drag(rightEdge(topRightStart) + 5, topRightStart.row + 10, topRightStart));
     expect(topRight.getBounds()).toEqual({
       ...topRightStart,
       row: topRightStart.row + 10,
-      width: topRightStart.width + 10,
+      width: topRightStart.width + 5,
       height: topRightStart.height - 10,
     });
 
     const bottomLeft = geometry();
     const bottomLeftStart = bottomLeft.getBounds();
     expect(bottomLeft.beginResize(press(bottomLeftStart, 0, bottomLeftStart.height - 1))).toBe(true);
-    bottomLeft.dragResize(drag(bottomLeftStart.col + 10, bottomEdge(bottomLeftStart) + 5, bottomLeftStart));
+    bottomLeft.dragResize(drag(bottomLeftStart.col + 10, bottomEdge(bottomLeftStart) + 3, bottomLeftStart));
     expect(bottomLeft.getBounds()).toEqual({
       ...bottomLeftStart,
       col: bottomLeftStart.col + 10,
       width: bottomLeftStart.width - 10,
-      height: bottomLeftStart.height + 5,
+      height: bottomLeftStart.height + 3,
     });
 
     const bottomRight = geometry();
     const bottomRightStart = bottomRight.getBounds();
     expect(bottomRight.beginResize(press(bottomRightStart, bottomRightStart.width - 1, bottomRightStart.height - 1))).toBe(true);
-    bottomRight.dragResize(drag(rightEdge(bottomRightStart) + 10, bottomEdge(bottomRightStart) + 5, bottomRightStart));
+    bottomRight.dragResize(drag(rightEdge(bottomRightStart) + 5, bottomEdge(bottomRightStart) + 3, bottomRightStart));
     expect(bottomRight.getBounds()).toEqual({
       ...bottomRightStart,
-      width: bottomRightStart.width + 10,
-      height: bottomRightStart.height + 5,
+      width: bottomRightStart.width + 5,
+      height: bottomRightStart.height + 3,
     });
   });
 
@@ -423,18 +429,18 @@ describe("BtwWindowGeometry full-width resizing", () => {
     const start = g.getBounds();
 
     expect(g.beginResize(press(start, midX(start), start.height - 1))).toBe(true);
-    g.dragResize(drag(start.col + midX(start), bottomEdge(start) + 5, start));
+    g.dragResize(drag(start.col + midX(start), bottomEdge(start) + 3, start));
 
-    expect(g.getBounds()).toEqual({ col: 0, row: 1, width: 100, height: start.height + 5 });
-    expect(g.getHeight()).toBe(start.height + 5);
+    expect(g.getBounds()).toEqual({ col: 0, row: 1, width: 100, height: start.height + 3 });
+    expect(g.getHeight()).toBe(start.height + 3);
   });
 
   it("keeps the saved window rectangle across full/window toggles and reopens", () => {
     const g = geometry();
     g.resizeBy(12, 5);
     const saved = g.getBounds();
-    // Right/bottom keyboard growth is capped at the terminal edge: 11 + 89 = 100.
-    expect(saved).toEqual({ col: 11, row: 1, width: 89, height: 28 });
+    // Right/bottom keyboard growth is capped at the terminal edge: 6 + 94 = 100.
+    expect(saved).toEqual({ col: 6, row: 1, width: 94, height: 29 });
 
     g.setFullWidth(true);
     expect(g.getBounds()).toEqual({ col: 0, row: 1, width: 100, height: saved.height });
@@ -453,12 +459,12 @@ describe("BtwWindowGeometry full-width resizing", () => {
     const start = g.getBounds();
 
     expect(g.beginResize(press(start, midX(start), start.height - 1))).toBe(true);
-    g.dragResize(drag(start.col + midX(start), bottomEdge(start) + 5, start));
+    g.dragResize(drag(start.col + midX(start), bottomEdge(start) + 3, start));
     g.endResize();
     expect(g.getHeight()).toBe(28);
 
     g.setFullWidth(false);
-    expect(g.getBounds()).toEqual({ col: 11, row: 1, width: 78, height: 28 });
+    expect(g.getBounds()).toEqual({ col: 6, row: 1, width: 88, height: 28 });
   });
 });
 
@@ -467,12 +473,13 @@ describe("BtwWindowGeometry keyboard resizing", () => {
     const g = geometry(120, 40);
     const start = g.getBounds();
 
-    g.resizeBy(10, 5);
+    // Deltas stay within the 8-column / 5-row margins of the default 120x40 window.
+    g.resizeBy(5, 3);
     expect(g.getBounds()).toEqual({
       col: start.col,
       row: start.row,
-      width: start.width + 10,
-      height: start.height + 5,
+      width: start.width + 5,
+      height: start.height + 3,
     });
   });
 
@@ -495,9 +502,10 @@ describe("BtwWindowGeometry keyboard resizing", () => {
 });
 
 describe("BtwWindowGeometry lifecycle", () => {
-  it("reset clears the preferred rectangle", () => {
+  it("reset clears the preferred rectangle back to the enlarged defaults", () => {
     const g = geometry();
     const initial = g.getBounds();
+    expect(initial).toEqual({ col: 6, row: 1, width: 88, height: 25 });
 
     g.resizeBy(10, 5);
     expect(g.getBounds()).not.toEqual(initial);
@@ -511,9 +519,9 @@ describe("BtwWindowGeometry lifecycle", () => {
     const g = geometry();
     g.resizeBy(12, 5);
     const preferred = g.getBounds();
-    expect(preferred).toEqual({ col: 11, row: 1, width: 89, height: 28 });
+    expect(preferred).toEqual({ col: 6, row: 1, width: 94, height: 29 });
 
-    // The clamped 60x20 viewport cannot show the preferred 89x28 rectangle.
+    // The clamped 60x20 viewport cannot show the preferred 94x29 rectangle.
     g.updateViewport(60, 20);
     expect(g.getBounds()).toEqual({ col: 0, row: 0, width: 60, height: 20 });
     expectOnScreen(g, 60, 20);
@@ -523,18 +531,18 @@ describe("BtwWindowGeometry lifecycle", () => {
     expect(g.getBounds()).toEqual(preferred);
   });
 
-  it("returns the clamped viewport height without reapplying the 32-row default cap", () => {
+  it("returns the clamped viewport height without reapplying the 40-row default cap", () => {
     const g = geometry(100, 60);
-    expect(g.getHeight()).toBe(32);
+    expect(g.getHeight()).toBe(40);
 
     g.resizeBy(0, 10);
-    expect(g.getHeight()).toBe(42);
+    expect(g.getHeight()).toBe(50);
 
     g.updateViewport(100, 20);
     expect(g.getHeight()).toBe(20);
 
     g.updateViewport(100, 60);
-    expect(g.getHeight()).toBe(42);
+    expect(g.getHeight()).toBe(50);
   });
 
   it("cancels an active drag when the viewport changes", () => {

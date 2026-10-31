@@ -2886,14 +2886,14 @@ describe("btw runtime behavior", () => {
       overlayOptions: {
         anchor: "top-left",
         row: 1,
-        col: 11,
+        col: 6,
         nonCapturing: true,
       },
     });
     expect(harness.widgets.some((entry) => entry.key === "btw" && typeof entry.content === "function")).toBe(false);
   });
 
-  it("defaults to the framed window width and advertises the Alt+w width toggle", async () => {
+  it("defaults to the enlarged framed window width and advertises the Alt+w width toggle", async () => {
     const harness = createHarness();
     promptStreamMock.mockImplementation(() => streamAnswer("Overlay answer"));
 
@@ -2901,8 +2901,8 @@ describe("btw runtime behavior", () => {
     await harness.command("btw", "overlay question");
 
     expect(harness.overlays.at(-1)?.factoryOptions?.overlayOptions).toMatchObject({
-      width: 78,
-      col: 11,
+      width: 88,
+      col: 6,
       row: 1,
       margin: 0,
     });
@@ -2922,7 +2922,7 @@ describe("btw runtime behavior", () => {
     overlay.handleInput("\x1b[1;4B");
     const options = harness.overlays.at(-1)!.factoryOptions!.overlayOptions as Record<string, unknown>;
     const resized = { width: options.width, maxHeight: options.maxHeight, row: options.row, col: options.col };
-    expect(resized.width).toBe(82);
+    expect(resized.width).toBe(92); // 88 default + 4 per Alt+Shift+Right
     expect(harness.overlays).toHaveLength(1); // resizing never tears down the overlay
 
     overlay.input.onEscape?.();
@@ -2972,8 +2972,8 @@ describe("btw runtime behavior", () => {
     await flushAsyncWork();
 
     expect(harness.overlays.at(-1)?.factoryOptions?.overlayOptions).toMatchObject({
-      width: 78,
-      col: 11,
+      width: 88,
+      col: 6,
       row: 1,
       margin: 0,
     });
@@ -3772,8 +3772,9 @@ describe("btw runtime behavior", () => {
     function resolveOverlayMaxHeight(rows: number): number {
       const marginTop = 1;
       const availHeight = Math.max(1, rows - marginTop);
-      const parsed = Math.floor((rows * 78) / 100);
-      return Math.max(1, Math.min(parsed, availHeight));
+      // Default height is 85% of the terminal, capped at 40 rows.
+      const parsed = Math.floor((rows * 85) / 100);
+      return Math.max(1, Math.min(parsed, availHeight, 40));
     }
 
     function withStdoutRows(rows: number): { restore: () => void } {

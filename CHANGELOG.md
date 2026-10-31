@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.9.0-fork.3] - 2026-10-31
+
+### Changed
+
+- Increase the default window width from 78% to 88% and height from 78% to 85% of the terminal, raising the default height cap from 32 to 40 rows. Manual resizing, reset behavior, terminal clamping, and full-width mode remain available.
+
 ## [0.9.0-fork.2] - 2026-10-24
 
 ### Added

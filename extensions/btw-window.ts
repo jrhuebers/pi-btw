@@ -61,8 +61,8 @@ export class BtwWindowGeometry {
   private defaultBounds(): BtwWindowBounds {
     const sideSpace = this.columns > 4 ? 4 : 0;
     const verticalSpace = this.rows > 2 ? 2 : 0;
-    const width = Math.min(this.columns - sideSpace, Math.max(72, Math.floor(this.columns * 0.78)));
-    const height = Math.min(this.rows - verticalSpace, Math.max(18, Math.min(32, Math.floor(this.rows * 0.78))));
+    const width = Math.min(this.columns - sideSpace, Math.max(72, Math.floor(this.columns * 0.88)));
+    const height = Math.min(this.rows - verticalSpace, Math.max(18, Math.min(40, Math.floor(this.rows * 0.85))));
     return { col: Math.floor((this.columns - width) / 2), row: verticalSpace ? 1 : 0, width, height };
   }
 

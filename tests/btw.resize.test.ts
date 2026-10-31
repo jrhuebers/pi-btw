@@ -151,18 +151,19 @@ function fixture(options: FixtureOptions = {}) {
 }
 
 describe("BTW overlay resize with the real Pi fullscreen dispatcher", () => {
-  it("uses the shared geometry options and defaults to col 11, row 1, 78x23 at 100x30", () => {
+  it("uses the shared geometry options and defaults to col 6, row 1, 88x25 at 100x30", () => {
     const f = fixture();
     expect(f.geometry.options.visible).toBeTypeOf("function");
-    expect(f.geometry.options.col).toBe(11);
+    expect(f.geometry.options.col).toBe(6);
     expect(f.geometry.options.row).toBe(1);
-    expect(f.geometry.options.width).toBe(78);
-    expect(f.geometry.options.maxHeight).toBe(23);
-    expect(f.bounds()).toEqual({ col: 11, row: 1, width: 78, height: 23 });
+    expect(f.geometry.options.width).toBe(88);
+    expect(f.geometry.options.maxHeight).toBe(25);
+    expect(f.bounds()).toEqual({ col: 6, row: 1, width: 88, height: 25 });
   });
 
   it("resizes live from SGR press/drag/release on the bottom edge with one component and handle", () => {
-    const f = fixture();
+    // A roomier terminal leaves room below the default 85%-height window for the +5 drag.
+    const f = fixture({ rows: 44 });
     const before = f.bounds();
     const renderSpy = vi.spyOn(f.overlay, "render");
     // The press lands on the bottom border row, so dragging it down by dy rows
@@ -179,7 +180,8 @@ describe("BTW overlay resize with the real Pi fullscreen dispatcher", () => {
   });
 
   it("keeps the drag capture alive far outside the original bounds", () => {
-    const f = fixture({ rows: 44 });
+    // Room for the default 40-row capped height plus 10 rows past the bottom edge.
+    const f = fixture({ rows: 60 });
     const before = f.bounds();
     const x = before.col + Math.floor(before.width / 2);
     f.sgr("press", x, before.row + before.height - 1);
@@ -261,14 +263,14 @@ describe("BTW overlay resize with the real Pi fullscreen dispatcher", () => {
     expect(f.bounds()).toEqual(before);
   });
 
-  it("lets the user grow height beyond 32 rows by keyboard", () => {
+  it("lets the user grow height beyond 40 rows by keyboard", () => {
     const f = fixture({ rows: 50 });
     const before = f.bounds();
-    expect(before.height).toBe(32);
-    for (let index = 0; index < 6; index++) f.key("\x1b[1;4B");
+    expect(before.height).toBe(40);
+    for (let index = 0; index < 3; index++) f.key("\x1b[1;4B");
     const after = f.bounds();
-    expect(after.height).toBe(before.height + 12);
-    expect(after.height).toBeGreaterThan(32);
+    expect(after.height).toBe(before.height + 6);
+    expect(after.height).toBeGreaterThan(40);
     expect(after.row + after.height).toBeLessThanOrEqual(f.rows);
   });
 
@@ -277,7 +279,7 @@ describe("BTW overlay resize with the real Pi fullscreen dispatcher", () => {
     // A user resize records the preferred geometry before the terminal shrinks.
     f.key("\x1b[1;4B");
     f.key("\x1b[1;4B");
-    expect(f.bounds().height).toBe(27);
+    expect(f.bounds().height).toBe(29);
     f.overlay.setDraft("tiny draft");
     f.terminal.columns = 24;
     f.terminal.rows = 8;
@@ -290,8 +292,8 @@ describe("BTW overlay resize with the real Pi fullscreen dispatcher", () => {
     f.terminal.columns = 100;
     f.terminal.rows = 30;
     f.tui.renderNow();
-    // The user's preferred height (27, not the 23 default) is restored.
-    expect(f.bounds()).toEqual({ col: 11, row: 1, width: 78, height: 27 });
+    // The user's preferred height (29, not the 25 default) is restored.
+    expect(f.bounds()).toEqual({ col: 6, row: 1, width: 88, height: 29 });
   });
 
   it("keeps completion rows fitting at the minimum height of 12", () => {
